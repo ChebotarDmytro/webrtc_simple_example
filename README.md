@@ -1,6 +1,6 @@
-# WebRTC Hello World - C++ Example
+# WebRTC Hello World - C++ Example with Conan
 
-A simple WebRTC application demonstrating peer-to-peer connection and data channel communication using Google's native WebRTC library on Linux with depot_tools bundled Clang.
+A simple WebRTC application demonstrating peer-to-peer connection and data channel communication using Google's native WebRTC library on Linux, packaged with Conan 2.x.
 
 ## Table of Contents
 
@@ -8,20 +8,25 @@ A simple WebRTC application demonstrating peer-to-peer connection and data chann
 - [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
-- [Building WebRTC](#building-webrtc)
-- [Building the Project](#building-the-project)
+- [Building WebRTC with Conan](#building-webrtc-with-conan)
+- [Building the Example Project](#building-the-example-project)
 - [Running the Application](#running-the-application)
 - [Project Structure](#project-structure)
+- [Build Configuration Details](#build-configuration-details)
 - [Troubleshooting](#troubleshooting)
-- [Common Issues and Solutions](#common-issues-and-solutions)
-- [Migration to New API](#migration-to-new-api)
+- [Advanced Configuration](#advanced-configuration)
 - [License](#license)
 
 ## Overview
 
-This project demonstrates the basic concepts of WebRTC by creating two peer connections that communicate through a data channel. It simulates a local peer-to-peer connection where both peers run in the same application, exchanging "Hello World" messages.
+This project demonstrates the basic concepts of WebRTC by creating two peer connections that communicate through a data channel. It uses **Conan 2.x** to manage the WebRTC dependency, making builds reproducible and easier to manage.
 
-**Important**: This example uses the **depot_tools bundled Clang** to avoid architecture compatibility issues between the WebRTC build and your application.
+**Key Features**:
+- Uses Conan 2.x for dependency management
+- Supports Debug and RelWithDebInfo build types
+- Uses system Clang-21 compiler with lld linker
+- Monolithic WebRTC library (single `libwebrtc.a`)
+- Simple three-step build process
 
 ## Features
 
@@ -30,9 +35,10 @@ This project demonstrates the basic concepts of WebRTC by creating two peer conn
 - ✅ Exchanges SDP offers and answers
 - ✅ Handles ICE candidate gathering and exchange
 - ✅ Sends and receives text messages via data channel
-- ✅ Uses depot_tools LLVM toolchain (Clang + lld linker)
+- ✅ Conan 2.x package management
+- ✅ Uses Clang-21 + lld linker
 - ✅ Proper memory management with smart pointers
-- ✅ Modern C++17
+- ✅ Modern C++23
 
 ## Prerequisites
 
@@ -45,28 +51,30 @@ This project demonstrates the basic concepts of WebRTC by creating two peer conn
 
 ### Software Requirements
 
-- **Git**: Latest version
-- **Python**: 3.8 or later (required by depot_tools)
-- **depot_tools**: Google's build tools (includes Clang, Ninja, GN)
+```bash
+sudo apt update
+sudo apt install -y \
+  git python3 python3-pip curl \
+  libgtk-3-dev libx11-dev libxss1 libnss3-dev libasound2-dev \
+  libglu1-mesa-dev libxrandr-dev libxcomposite-dev libxdamage-dev \
+  libxfixes-dev libxext-dev clang-21 lld-21
+```
 
-**Note**: You do NOT need to install system Clang or CMake separately - depot_tools provides everything needed.
+### Install Conan 2.x
+
+```bash
+pip install conan
+conan --version  # Should show 2.x.x
+
+# Initialize Conan profile
+conan profile detect --force
+```
 
 ## Installation
 
-### Step 1: Install Basic System Dependencies
+### Step 1: Create Workspace Structure
 
 ```bash
-sudo apt update
-sudo apt install -y git python3 python3-pip curl \
-  libgtk-3-dev libx11-dev libxss1 libnss3-dev libasound2-dev \
-  libglu1-mesa-dev libxrandr-dev libxcomposite-dev libxdamage-dev \
-  libxfixes-dev libxext-dev
-```
-
-### Step 2: Create Workspace Structure
-
-```bash
-# Create main workspace directory
 mkdir -p ~/workspace
 cd ~/workspace
 ```
@@ -74,214 +82,167 @@ cd ~/workspace
 Your final structure will be:
 ```
 ~/workspace/
-├── depot_tools/              # Google's build tools
-├── webrtc_checkout/
-│   └── src/                  # WebRTC source code
-└── webrtc_simple_example/    # This project
-    ├── main.cpp
+├── webrtc/                    # WebRTC Conan package recipe
+│   ├── conanfile.py
+│   ├── depot_tools/           # Created during conan source
+│   └── webrtc_checkout/       # Created during conan source
+│       └── src/
+└── webrtc_simple_example/     # This example project
+    ├── conanfile.py
     ├── CMakeLists.txt
+    ├── main.cpp
     └── ...
 ```
 
-### Step 3: Install depot_tools
+### Step 2: Clone Repositories
 
 ```bash
 cd ~/workspace
-git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
 
-# Add to PATH permanently
-echo 'export PATH="$HOME/workspace/depot_tools:$PATH"' >> ~/.bashrc
-source ~/.bashrc
+# Clone WebRTC Conan recipe
+mkdir webrtc
+cd webrtc
+# Copy your WebRTC conanfile.py here
 
-# Verify installation
-which gclient
-which gn
-which ninja
+# Clone example project
+cd ~/workspace
+git clone <your-repository-url> webrtc_simple_example
 ```
 
-### Step 4: Create Python Symlink (Required)
+## Building WebRTC with Conan
 
-depot_tools expects `python` to be available:
+### Build Types Supported
 
-```bash
-# Check if python3 exists
-which python3
-
-# Create symlink
-sudo ln -s /usr/bin/python3 /usr/bin/python
-
-# Verify
-python --version
-```
-
-### Step 5: Create vpython Symlink (Required)
-
-```bash
-cd ~/workspace/depot_tools
-ln -s vpython3 vpython
-
-# Verify
-ls -la | grep vpython
-```
-
-## Building WebRTC
-
-This is the most time-consuming step. Plan for 2-4 hours on first build.
+- **Debug**: Full debug symbols, no optimization (`-O0`), asserts enabled
+- **RelWithDebInfo**: Optimized with `-O2`, minimal debug symbols (recommended for development)
 
 ### Step 1: Fetch WebRTC Source
 
-```bash
-cd ~/workspace
-mkdir webrtc_checkout
-cd webrtc_checkout
-
-# Fetch WebRTC (downloads ~10GB)
-fetch --nohooks webrtc
-cd src
-
-# Switch to a stable branch (recommended)
-git checkout branch-heads/7151
-
-# Sync dependencies (30-60 minutes)
-gclient sync
-```
-
-### Step 2: Configure WebRTC Build
-
-**Recommended GN Args**:
+This downloads depot_tools and WebRTC source (~10GB):
 
 ```bash
-cd ~/workspace/webrtc_checkout/src
-
-# Clean any previous builds
-rm -rf out/Default
-
-# Configure build
-gn gen out/Default --args='
-target_os = "linux"
-target_cpu = "x64"
-is_debug = true
-rtc_include_tests = false
-rtc_use_h264 = true
-ffmpeg_branding = "Chrome"
-is_component_build = false
-use_rtti = true
-use_custom_libcxx = false
-rtc_enable_protobuf = false
-'
+cd ~/workspace/webrtc
+conan source .
 ```
 
-**GN Args Explanation**:
-- `target_os = "linux"` - Build for Linux
-- `target_cpu = "x64"` - 64-bit architecture
-- `is_debug = true` - Debug build with symbols
-- `use_rtti = true` - Enable RTTI (required by some applications)
-- `use_custom_libcxx = false` - Use system libstdc++ to avoid compatibility issues
-- `rtc_enable_protobuf = false` - Disable protobuf if not needed
-- `rtc_use_h264 = true` - Enable H.264 codec support
-- `ffmpeg_branding = "Chrome"` - Enable additional codecs
+**What this does**:
+- Clones depot_tools into `depot_tools/`
+- Creates `webrtc_checkout/.gclient` config
+- Runs `gclient sync` to download WebRTC source
+- Checks out branch `branch-heads/7151` (M137)
 
-### Step 3: Build WebRTC Core
+**Time**: 30-60 minutes depending on network speed
+
+### Step 2: Build WebRTC Package
+
+**For Debug build**:
+```bash
+cd ~/workspace/webrtc
+conan build . -s build_type=Debug
+```
+
+**For RelWithDebInfo build**:
+```bash
+cd ~/workspace/webrtc
+conan build . -s build_type=RelWithDebInfo
+```
+
+**What this does**:
+- Configures GN with appropriate args for build type
+- Builds monolithic `libwebrtc.a` using depot_tools Ninja
+- Uses Clang-21 from `/usr/bin/clang++-21`
+- Runs `ranlib` on all static libraries
+
+**Time**: 2-4 hours on first build
+
+### Step 3: Package WebRTC
+
+Export the built package to Conan cache:
+
+**For Debug**:
+```bash
+cd ~/workspace/webrtc
+conan export-pkg . -s build_type=Debug
+```
+
+**For RelWithDebInfo**:
+```bash
+cd ~/workspace/webrtc
+conan export-pkg . -s build_type=RelWithDebInfo
+```
+
+**What this does**:
+- Packages headers from `api/`, `rtc_base/`, `p2p/`, etc.
+- Packages `libwebrtc.a` library
+- Copies to Conan cache: `~/.conan2/p/webrtc.../p/`
+- Makes package available for other projects
+
+### Verify Package
 
 ```bash
-# Build core WebRTC (2-4 hours on first build)
-ninja -C out/Default
-
-# If you have limited RAM, limit parallel jobs:
-# ninja -C out/Default -j4
+conan list webrtc/7151
 ```
 
-### Step 4: Build Video Codec Factories
+You should see:
+```
+webrtc/7151
+  Debug
+  RelWithDebInfo
+```
 
-**Important**: As of recent WebRTC versions, the `rtc_include_builtin_video_codecs` flag has been removed (see [WebRTC Issue #42223784](https://issues.webrtc.org/issues/42223784#comment26)).
+## Building the Example Project
 
-You must explicitly build the video encoder/decoder factory targets:
+### Step 1: Install Dependencies
 
+This fetches the WebRTC package from Conan cache (or builds it if missing):
+
+**For Debug**:
 ```bash
-cd ~/workspace/webrtc_checkout/src
-
-# Build video encoder factory
-ninja -C out/Default api/video_codecs:builtin_video_encoder_factory
-
-# Build video decoder factory
-ninja -C out/Default api/video_codecs:builtin_video_decoder_factory
-
-# Build audio codec factories (if needed)
-ninja -C out/Default api/audio_codecs:builtin_audio_encoder_factory
-ninja -C out/Default api/audio_codecs:builtin_audio_decoder_factory
+cd ~/workspace/webrtc_simple_example
+conan install . --output-folder=build --build=missing -s build_type=Debug
 ```
 
-### Step 5: Run ranlib on All Archives
-
-This fixes "archive has no index" linker errors:
-
+**For RelWithDebInfo**:
 ```bash
-cd ~/workspace/webrtc_checkout/src/out/Default/obj
-find . -name "*.a" -exec ranlib {} \;
+cd ~/workspace/webrtc_simple_example
+conan install . --output-folder=build --build=missing -s build_type=RelWithDebInfo
 ```
 
-### Step 6: Verify Video Codec Factory Symbols
+**What this does**:
+- Resolves `webrtc/7151` dependency
+- Generates CMake toolchain files in `build/`
+- Creates `conan_toolchain.cmake` with correct compiler flags
 
-Confirm the video encoder/decoder factories were built:
+### Step 2: Build Example
 
+**For Debug**:
 ```bash
-cd ~/workspace/webrtc_checkout/src/out/Default
-find obj -name "*.a" -exec nm {} \; 2>/dev/null | grep "CreateBuiltinVideoEncoder"
+cd ~/workspace/webrtc_simple_example
+conan build . -s build_type=Debug
 ```
 
-You should see output like:
-```
-0000000000000000 T _ZN6webrtc32CreateBuiltinVideoEncoderFactoryEv
-0000000000000000 T _ZN6webrtc32CreateBuiltinVideoDecoderFactoryEv
-```
-
-If you don't see these symbols, go back to Step 4 and run the explicit ninja commands.
-
-## Building the Project
-
-### Step 1: Clone This Repository
-
+**For RelWithDebInfo**:
 ```bash
-cd ~/workspace
-git clone <your-repository-url> webrtc_simple_example
-cd webrtc_simple_example
+cd ~/workspace/webrtc_simple_example
+conan build . -s build_type=RelWithDebInfo
 ```
 
-### Step 2: Configure with CMake
-
-The project automatically uses depot_tools' LLVM toolchain. You can override paths if needed:
-
-**Default build** (uses paths relative to project location):
-```bash
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-```
-
-**Custom paths**:
-```bash
-mkdir build && cd build
-cmake .. \
-  -DLLVM_PATH=/path/to/custom/llvm \
-  -DWEBRTC_ROOT=/path/to/webrtc/src \
-  -DWEBRTC_BUILD_DIR=/path/to/webrtc/out/Default
-make -j$(nproc)
-```
-
-### Step 3: Build
-
-```bash
-make -j$(nproc)
-```
+**What this does**:
+- Runs CMake configure with Conan toolchain
+- Compiles your application with Clang-21
+- Links against `libwebrtc.a` and system libraries
+- Creates executable in `build/Debug/` or `build/RelWithDebInfo/`
 
 ## Running the Application
 
 ```bash
-# From build directory
-./webrtcexample
+cd ~/workspace/webrtc_simple_example
 
-# Or from project root
-./build/webrtcexample
+# Debug build
+./build/Debug/webrtcexample
+
+# RelWithDebInfo build
+./build/RelWithDebInfo/webrtcexample
 ```
 
 ### Expected Output
@@ -310,33 +271,29 @@ SDP creation successful: answer
 
 ```
 ~/workspace/
-├── depot_tools/                      # Google's build tools
-│   ├── gclient
-│   ├── gn
-│   ├── ninja
-│   └── ...
+├── webrtc/                              # WebRTC Conan package
+│   ├── conanfile.py                     # Package recipe
+│   ├── depot_tools/                     # Google build tools
+│   │   ├── gclient
+│   │   ├── gn
+│   │   └── ninja
+│   └── webrtc_checkout/
+│       ├── .gclient
+│       └── src/                         # WebRTC source
+│           ├── api/
+│           ├── modules/
+│           ├── out/
+│           │   ├── Debug/
+│           │   │   └── obj/
+│           │   │       └── libwebrtc.a
+│           │   └── RelWithDebInfo/
+│           │       └── obj/
+│           │           └── libwebrtc.a
+│           └── third_party/
 │
-├── webrtc_checkout/
-│   └── src/                          # WebRTC source
-│       ├── api/
-│       │   ├── audio_codecs/
-│       │   │   ├── builtin_audio_encoder_factory.*
-│       │   │   └── builtin_audio_decoder_factory.*
-│       │   └── video_codecs/
-│       │       ├── builtin_video_encoder_factory.*
-│       │       └── builtin_video_decoder_factory.*
-│       ├── modules/
-│       ├── out/Default/              # Build output
-│       │   └── obj/                  # Static libraries
-│       └── third_party/
-│           └── llvm-build/           # Bundled Clang toolchain
-│               └── Release+Asserts/
-│                   └── bin/
-│                       ├── clang++
-│                       ├── clang
-│                       └── ld.lld    # LLVM linker
-│
-└── webrtc_simple_example/            # This project
+└── webrtc_simple_example/               # Example project
+    ├── conanfile.py                     # Dependencies
+    ├── CMakeLists.txt                   # Build config
     ├── main.cpp
     ├── data_channel_observer.cpp
     ├── data_channel_observer.h
@@ -346,269 +303,365 @@ SDP creation successful: answer
     ├── sdp_observer.h
     ├── local_signaling.cpp
     ├── local_signaling.h
-    ├── CMakeLists.txt
-    ├── README.md
-    └── build/                        # Build output
-        └── webrtcexample             # Executable
+    └── build/                           # Build output
+        ├── Debug/
+        │   └── webrtcexample
+        └── RelWithDebInfo/
+            └── webrtcexample
 ```
+
+## Build Configuration Details
+
+### GN Args Used
+
+#### Debug Build
+```python
+target_os = "linux"
+target_cpu = "x64"
+is_debug = true                # No optimization (-O0)
+is_official_build = false
+symbol_level = 2               # Full debug symbols
+is_component_build = false     # Monolithic library
+rtc_include_tests = false
+rtc_build_examples = false
+rtc_use_h264 = true
+use_rtti = false
+use_custom_libcxx = false
+```
+
+**Characteristics**:
+- No optimization (`-O0`)
+- Full debug symbols
+- Assertions enabled
+- Best for debugging
+
+#### RelWithDebInfo Build
+```python
+target_os = "linux"
+target_cpu = "x64"
+is_debug = false               # Enables optimization
+is_official_build = false      # Uses -O2 (not -O3 + PGO)
+symbol_level = 1               # Minimal debug symbols
+chrome_pgo_phase = 0           # Disable PGO explicitly
+is_component_build = false     # Monolithic library
+rtc_include_tests = false
+rtc_build_examples = false
+rtc_use_h264 = true
+use_rtti = false
+use_custom_libcxx = false
+```
+
+**Characteristics**:
+- Optimized with `-O2` (automatically applied by WebRTC)
+- Minimal debug symbols (can still debug crashes)
+- Assertions disabled
+- **4-5x faster than Debug**
+- Best for development & profiling
+
+### Why Not is_official_build=true?
+
+Setting `is_official_build=true` enables:
+- Profile-Guided Optimization (PGO)
+- Requires Chrome-specific `.profdata` files
+- Needs multiple build passes
+- Can cause `SIGILL` (Illegal Instruction) errors
+
+**For standalone WebRTC builds, always use `is_official_build=false`.**
+
+### Optimization Levels
+
+WebRTC automatically selects optimization based on GN args:
+
+| is_debug | is_official_build | Optimization | Use Case |
+|----------|-------------------|--------------|----------|
+| true     | false             | `-O0`        | Debug |
+| false    | false             | `-O2`        | **RelWithDebInfo** ✅ |
+| false    | true              | `-O3` + PGO  | Chrome only ❌ |
+
+**You cannot override optimization levels in GN args** - they're controlled by WebRTC's `//build/config/compiler/BUILD.gn`.
 
 ## Troubleshooting
 
+### Conan Issues
+
+#### ❌ Error: `conan: command not found`
+**Solution**:
+```bash
+pip install conan
+# Add to PATH if needed
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+#### ❌ Error: `webrtc/7151: Not found in local cache`
+**Solution**: Build and export the WebRTC package:
+```bash
+cd ~/workspace/webrtc
+conan source .
+conan build . -s build_type=Debug
+conan export-pkg . -s build_type=Debug
+```
+
+#### ❌ Error: `Incompatible package`
+**Solution**: Make sure build types match:
+```bash
+# Check what's available
+conan list webrtc/7151
+
+# Remove and rebuild if needed
+conan remove webrtc/7151 -c
+```
+
 ### Build Issues
 
+#### ❌ Error: `FileNotFoundError: chrome/build/linux.pgo.txt`
+**Cause**: PGO (Profile-Guided Optimization) is enabled but Chrome profile files are missing  
+**Solution**: This is fixed in the conanfile.py by setting:
+```python
+is_official_build = false
+chrome_pgo_phase = 0
+```
+If you still see this, make sure you're using the updated conanfile.py.
+
+#### ❌ Error: `Unexpected token '-'` in GN args
+**Cause**: Invalid GN argument like `optimize_max=-O2`  
+**Solution**: Remove invalid args. Optimization is automatic:
+```python
+# ❌ WRONG
+args.append('optimize_max=-O2')
+
+# ✅ CORRECT
+args.append('is_debug=false')  # This automatically uses -O2
+```
+
+#### ❌ Error: `SIGILL (Illegal Instruction)` during runtime
+**Cause**: PGO or aggressive optimizations generated CPU-specific instructions  
+**Solution**: The updated conanfile.py fixes this by:
+- Setting `chrome_pgo_phase=0` to disable PGO
+- Using `is_official_build=false` to use `-O2` (not `-O3`)
+
+If you built with old settings, rebuild:
+```bash
+cd ~/workspace/webrtc
+rm -rf webrtc_checkout/src/out/RelWithDebInfo
+conan build . -s build_type=RelWithDebInfo
+conan export-pkg . -s build_type=RelWithDebInfo --force
+```
+
 #### ❌ Error: `gclient: command not found`
-**Cause**: depot_tools not in PATH  
-**Solution**:
+**Solution**: Run `conan source .` first to clone depot_tools:
 ```bash
-export PATH="$HOME/workspace/depot_tools:$PATH"
-echo 'export PATH="$HOME/workspace/depot_tools:$PATH"' >> ~/.bashrc
-source ~/.bashrc
+cd ~/workspace/webrtc
+conan source .
 ```
 
-#### ❌ Error: `[Errno 2] No such file or directory: 'python'`
-**Cause**: Python symlink missing  
-**Solution**:
+#### ❌ Error: `clang++-21: not found`
+**Solution**: Install LLVM 21:
 ```bash
-sudo ln -s /usr/bin/python3 /usr/bin/python
-python --version
-```
-
-#### ❌ Error: `[Errno 2] No such file or directory: 'vpython'`
-**Cause**: vpython symlink missing in depot_tools  
-**Solution**:
-```bash
-cd ~/workspace/depot_tools
-ln -s vpython3 vpython
-ls -la | grep vpython
+sudo apt install clang-21 lld-21
+which clang++-21  # Should show /usr/bin/clang++-21
 ```
 
 #### ❌ Error: `undefined reference to CreateBuiltinVideoEncoderFactory()`
 **Cause**: Video codec factory targets not built  
-**Solution**: Build the specific targets explicitly:
+**Solution**: This shouldn't happen with monolithic build. If it does:
 ```bash
-cd ~/workspace/webrtc_checkout/src
-ninja -C out/Default api/video_codecs:builtin_video_encoder_factory
-ninja -C out/Default api/video_codecs:builtin_video_decoder_factory
+cd ~/workspace/webrtc/webrtc_checkout/src
+ninja -C out/Debug api/video_codecs:builtin_video_encoder_factory
+ninja -C out/Debug api/video_codecs:builtin_video_decoder_factory
 ```
 
-Then verify the symbols exist:
+#### ❌ Error: `archive has no index`
+**Solution**: Already handled in conanfile.py. If still occurs:
 ```bash
-find out/Default/obj -name "*.a" -exec nm {} \; 2>/dev/null | grep CreateBuiltinVideo
-```
-
-Run ranlib and rebuild your project:
-```bash
-cd out/Default/obj
+cd ~/workspace/webrtc/webrtc_checkout/src/out/Debug/obj
 find . -name "*.a" -exec ranlib {} \;
-cd ~/workspace/webrtc_simple_example/build
-make clean && make
-```
-
-#### ❌ Error: `unknown architecture of input file ... is incompatible with i386:x86-64`
-**Cause**: System linker (`/usr/bin/ld`) can't understand depot_tools Clang output  
-**Solution**: Ensure CMake uses depot_tools linker (automatically configured in CMakeLists.txt):
-```cmake
-set(CMAKE_EXE_LINKER_FLAGS "-fuse-ld=lld")
-```
-
-Check your build output shows:
-```
--- Linker: lld (/.../llvm-build/Release+Asserts/bin/ld.lld)
-```
-
-If you see `/usr/bin/ld` being used, your CMakeLists.txt isn't configured correctly.
-
-#### ❌ Error: `archive has no index; run ranlib to add one`
-**Cause**: Static libraries missing symbol index  
-**Solution**:
-```bash
-cd ~/workspace/webrtc_checkout/src/out/Default/obj
-find . -name "*.a" -exec ranlib {} \;
-```
-
-Then rebuild your project.
-
-#### ❌ Error: `GLIBCXX_3.4.30 not found`
-**Cause**: Version mismatch between WebRTC's libstdc++ and system libraries  
-**Solution**: Already handled in GN args with `use_custom_libcxx = false`. If still occurs:
-```bash
-# Check your system version
-strings /usr/lib/x86_64-linux-gnu/libstdc++.so.6 | grep GLIBCXX | tail -5
-
-# Update system
-sudo apt update && sudo apt upgrade
 ```
 
 ### Runtime Issues
 
 #### ❌ No output or program hangs
-**Solution**: Check thread initialization
-- Verify network, worker, and signaling threads start
-- Enable verbose logging (see Debug section)
-
-#### ❌ ICE connection fails
-**Solution**:
-- Check firewall settings
-- Verify STUN server accessibility
-- Check logs for ICE gathering errors
-
-### Debug Mode
-
-Enable verbose WebRTC logging by adding to `main.cpp`:
-
+**Solution**: Enable verbose logging in `main.cpp`:
 ```cpp
 #include "rtc_base/logging.h"
 
 int main() {
-    // Enable verbose logging
     rtc::LogMessage::LogToDebug(rtc::LS_VERBOSE);
     rtc::LogMessage::LogTimestamps();
-    rtc::LogMessage::LogThreads();
-    
-    // Your code...
+    // ...
 }
 ```
 
-## Common Issues and Solutions
+### Verification Commands
 
-### Issue: Out of Memory During WebRTC Build
-
-**Symptoms**: Build fails with errors, system becomes unresponsive  
-**Solution**: Limit parallel jobs
+#### Check GN Configuration
 ```bash
-# Use only 4 parallel jobs
-ninja -C out/Default -j4
+cd ~/workspace/webrtc/webrtc_checkout/src
 
-# Or based on RAM: 2GB RAM per job
-ninja -C out/Default -j$(($(free -g | awk '/^Mem:/{print $2}')/2))
+# View all GN args used
+gn args out/RelWithDebInfo --short
+
+# Should show:
+# is_debug = false
+# is_official_build = false
+# chrome_pgo_phase = 0
 ```
 
-### Issue: Different WebRTC Branch
-
-**If you need a different branch**:
+#### Check Optimization Level
 ```bash
-cd ~/workspace/webrtc_checkout/src
+# Check actual compiler flags
+gn desc out/RelWithDebInfo //api:libjingle_peerconnection_api cflags | grep "\-O"
 
-# List available branches
-git branch -r | grep branch-heads | tail -20
-
-# Checkout desired branch
-git checkout branch-heads/XXXX
-gclient sync
+# Should see: -O2
+# Should NOT see: -O3
 ```
 
-**Recommended branches**:
-- `branch-heads/7151` - Recent stable (M137, 2024)
-- `branch-heads/5790` - M108 (2022) 
-- `branch-heads/4324` - M88 (older, may lack builtin factory support)
-
-### Issue: Need to Clean Everything
-
-**Complete clean rebuild**:
+#### Verify Library
 ```bash
-# Clean WebRTC
-cd ~/workspace/webrtc_checkout/src
-rm -rf out/
+# Check library exists
+ls -lh ~/workspace/webrtc/webrtc_checkout/src/out/RelWithDebInfo/obj/libwebrtc.a
 
-# Clean your project
-cd ~/workspace/webrtc_simple_example
-rm -rf build/
-
-# Start over from build steps
+# Check symbols
+nm -C out/RelWithDebInfo/obj/libwebrtc.a | grep CreateBuiltinVideo
 ```
-
-### Issue: Missing Codec Support
-
-**If you need specific codecs**:
-
-For **VP8/VP9**:
-```bash
-ninja -C out/Default modules/video_coding:webrtc_vp8
-ninja -C out/Default modules/video_coding:webrtc_vp9
-```
-
-For **H.264** (requires `rtc_use_h264 = true`):
-```bash
-ninja -C out/Default modules/video_coding:webrtc_h264
-```
-
-For **AV1**:
-```bash
-ninja -C out/Default modules/video_coding/codecs/av1:av1_svc_config
-```
-
-## Migration to New API
-
-### Deprecated: `CreateBuiltinVideoEncoderFactory()`
-
-WebRTC developers are phasing out `CreateBuiltinVideoEncoderFactory()` in favor of the more flexible `VideoEncoderFactoryTemplate` API.
-
-**Old API** (still works but deprecated):
-```cpp
-#include "api/video_codecs/builtin_video_encoder_factory.h"
-
-auto encoder_factory = webrtc::CreateBuiltinVideoEncoderFactory();
-```
-
-**New API** (recommended):
-```cpp
-#include "api/video_codecs/video_encoder_factory_template.h"
-#include "api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h"
-#include "api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h"
-#include "api/video_codecs/video_encoder_factory_template_open_h264_adapter.h"
-
-auto encoder_factory = std::make_unique<webrtc::VideoEncoderFactoryTemplate<
-    webrtc::LibvpxVp8EncoderTemplateAdapter,
-    webrtc::LibvpxVp9EncoderTemplateAdapter,
-    webrtc::OpenH264EncoderTemplateAdapter
->>();
-```
-
-**Benefits of new API**:
-- More explicit codec selection
-- Better control over codec configuration
-- Easier to add custom encoders
-- No need for separate build flags
-
-**Migration steps**:
-1. Replace includes
-2. Switch to template-based factory
-3. Explicitly list desired codecs
-4. Update build targets if needed
-
-For more details, see [WebRTC Issue #42223784](https://issues.webrtc.org/issues/42223784).
 
 ## Advanced Configuration
 
-### Custom Compiler Flags
+### Changing WebRTC Branch
 
-Edit `CMakeLists.txt`:
-```cmake
-target_compile_options(webrtcexample PRIVATE
-    -O2                    # Optimization level
-    -g                     # Debug symbols
-    -DNDEBUG              # Disable asserts
-)
+Edit `webrtc/conanfile.py`:
+```python
+class WebRTCConan(ConanFile):
+    name = "webrtc"
+    version = "7151"  # Change to desired branch number
 ```
 
-### Link Against Specific WebRTC Libraries
+Available branches:
+- `7151` - M137 (2024, current)
+- `6099` - M120 (2023)
+- `5790` - M108 (2022)
 
-Instead of all libraries:
-```cmake
-# In CMakeLists.txt, replace:
-file(GLOB_RECURSE WEBRTC_LIBS ...)
-
-# With specific libraries:
-set(WEBRTC_LIBS
-    ${WEBRTC_BUILD_DIR}/obj/libwebrtc.a
-    ${WEBRTC_BUILD_DIR}/obj/api/video_codecs/libbuiltin_video_encoder_factory.a
-    # Add only what you need...
-)
+Then rebuild:
+```bash
+cd ~/workspace/webrtc
+rm -rf webrtc_checkout/
+conan source .
+conan build . -s build_type=Debug
+conan export-pkg . -s build_type=Debug
 ```
+
+### Custom GN Args
+
+Edit the `_get_gn_args()` method in `webrtc/conanfile.py`:
+
+```python
+def _get_gn_args(self):
+    args = []
+    # ... existing args ...
+    
+    # Add custom args
+    args.append('rtc_use_h265=true')  # Enable H.265 (if available)
+    
+    return args
+```
+
+### Build Only Specific Configurations
+
+```bash
+# Build only Debug
+cd ~/workspace/webrtc
+conan source .
+conan build . -s build_type=Debug
+conan export-pkg . -s build_type=Debug
+
+# Or only RelWithDebInfo
+conan build . -s build_type=RelWithDebInfo
+conan export-pkg . -s build_type=RelWithDebInfo
+```
+
+### Clean Rebuild
+
+```bash
+# Remove from Conan cache
+conan remove webrtc/7151 -c
+
+# Clean workspace
+cd ~/workspace/webrtc
+rm -rf depot_tools/ webrtc_checkout/
+
+# Rebuild from scratch
+conan source .
+conan build . -s build_type=Debug
+conan export-pkg . -s build_type=Debug
+```
+
+## Conan Commands Reference
+
+### WebRTC Package Commands
+
+```bash
+# Fetch source
+conan source .
+
+# Build Debug
+conan build . -s build_type=Debug
+
+# Build RelWithDebInfo
+conan build . -s build_type=RelWithDebInfo
+
+# Export to cache
+conan export-pkg . -s build_type=Debug
+conan export-pkg . -s build_type=RelWithDebInfo
+
+# List packages
+conan list webrtc/7151
+
+# Remove package
+conan remove webrtc/7151 -c
+```
+
+### Example Project Commands
+
+```bash
+# Install dependencies + generate build files
+conan install . --output-folder=build --build=missing -s build_type=Debug
+
+# Build project
+conan build . -s build_type=Debug
+
+# Clean build
+rm -rf build/
+```
+
+## Build Type Comparison
+
+| Build Type      | Optimization | Debug Symbols | Asserts | Speed vs Debug | Use Case                |
+|-----------------|--------------|---------------|---------|----------------|-------------------------|
+| Debug           | None (-O0)   | Full          | Enabled | 1x (baseline)  | Development, debugging  |
+| RelWithDebInfo  | High (-O2)   | Minimal       | Disabled| 4-5x faster    | Profiling, performance  |
+
+**Recommendation**: Use `RelWithDebInfo` for development to get good performance while still being able to debug crashes.
+
+## Performance Notes
+
+### Expected Build Times
+
+| Operation | Time (First Build) | Time (Incremental) |
+|-----------|-------------------|-------------------|
+| `conan source` | 30-60 min | ~1 min (if already done) |
+| `conan build` (Debug) | 2-4 hours | 5-15 min |
+| `conan build` (RelWithDebInfo) | 2-4 hours | 5-15 min |
+| Example project | 1-2 min | 10-30 sec |
+
+### Disk Space Usage
+
+- WebRTC source: ~10 GB
+- Debug build: ~15 GB
+- RelWithDebInfo build: ~10 GB
+- **Total**: ~35-40 GB per workspace
+
+**Tip**: Use `export-pkg` workflow instead of `conan create` to avoid copying the entire source tree.
 
 ## Next Steps
-
-To extend this example:
 
 1. **Add Audio/Video Streams**
    - Use `AudioDeviceModule` for audio capture
@@ -622,22 +675,17 @@ To extend this example:
    - Add TURN servers for NAT traversal
    - Configure in `RTCConfiguration`
 
-4. **Migrate to New API**
-   - Use `VideoEncoderFactoryTemplate` instead of builtin factories
-   - Better codec control and configuration
-
-5. **Error Recovery**
-   - Implement reconnection logic
-   - Handle ICE restart
-   - Monitor connection quality
+4. **Create More Conan Packages**
+   - Package your application
+   - Share with team via Conan remotes
 
 ## Resources
 
+- [Conan 2.x Documentation](https://docs.conan.io/2/)
 - [WebRTC Native Code](https://webrtc.googlesource.com/src/)
-- [WebRTC Native API Documentation](https://webrtc.github.io/webrtc-org/native-code/native-apis/)
-- [depot_tools Documentation](https://commondatastorage.googleapis.com/chrome-infra-docs/flat/depot_tools/docs/html/depot_tools.html)
+- [WebRTC Native API](https://webrtc.github.io/webrtc-org/native-code/native-apis/)
+- [depot_tools](https://commondatastorage.googleapis.com/chrome-infra-docs/flat/depot_tools/docs/html/depot_tools.html)
 - [GN Build Configuration](https://gn.googlesource.com/gn/+/main/docs/reference.md)
-- [WebRTC Issue Tracker](https://issues.webrtc.org/)
 
 ## License
 
@@ -645,13 +693,39 @@ This project is provided as-is for educational purposes. WebRTC is licensed unde
 
 ---
 
-**Key Takeaways**:
-1. Always use depot_tools' bundled LLVM toolchain (Clang + lld)
-2. Explicitly build video codec factories: `ninja -C out/Default api/video_codecs:builtin_video_encoder_factory`
-3. Run `ranlib` on all `.a` files before linking
-4. Use `-fuse-ld=lld` to avoid architecture mismatch errors
-5. WebRTC build takes time - be patient!
-6. The `rtc_include_builtin_video_codecs` flag has been removed - build targets explicitly
-7. Consider migrating to `VideoEncoderFactoryTemplate` for future compatibility
+## Quick Start Summary
+
+**1. Build WebRTC package once**:
+```bash
+cd ~/workspace/webrtc
+conan source .
+conan build . -s build_type=Debug
+conan export-pkg . -s build_type=Debug
+
+# Optional: Also build RelWithDebInfo
+conan build . -s build_type=RelWithDebInfo
+conan export-pkg . -s build_type=RelWithDebInfo
+```
+
+**2. Build your project**:
+```bash
+cd ~/workspace/webrtc_simple_example
+conan install . --output-folder=build --build=missing -s build_type=Debug
+conan build . -s build_type=Debug
+./build/Debug/webrtcexample
+```
+
+**3. For RelWithDebInfo**, replace `Debug` with `RelWithDebInfo` in all commands.
+
+---
+
+## Key Takeaways
+
+1. ✅ Always use `is_official_build=false` for standalone WebRTC builds
+2. ✅ Set `chrome_pgo_phase=0` to disable PGO
+3. ✅ Don't try to override optimization levels - WebRTC controls them automatically
+4. ✅ RelWithDebInfo gives 4-5x better performance than Debug
+5. ✅ Use `conan export-pkg` workflow to save disk space
+6. ✅ Only Debug and RelWithDebInfo build types are supported
 
 **Happy Coding! 🚀**
