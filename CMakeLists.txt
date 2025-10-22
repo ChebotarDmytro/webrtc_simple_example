@@ -10,8 +10,9 @@ set(CMAKE_EXE_LINKER_FLAGS "-fuse-ld=lld")
 set(CMAKE_SHARED_LINKER_FLAGS "-fuse-ld=lld")
 
 # C++ standard
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 project(webrtcexample)
 
@@ -27,10 +28,6 @@ if(INDEX EQUAL -1)
             "Invalid build type: ${CMAKE_BUILD_TYPE}. "
             "Only Debug and RelWithDebInfo are supported.")
 endif()
-
-# WebRTC preprocessor definitions
-add_definitions(-DWEBRTC_POSIX=1)
-add_definitions(-D__STDC_CONSTANT_MACROS=1)
 
 # Find WebRTC package (provided by Conan)
 find_package(webrtc REQUIRED)
